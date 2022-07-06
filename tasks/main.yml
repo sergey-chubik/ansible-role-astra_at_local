@@ -1,0 +1,350 @@
+---
+# tasks file for astra_at_local
+- block:
+    - name: astra_at_local | Creation of directory for repositories
+      file:
+        path: "{{ astra_at_local_repo_dir }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: astra_at_local | Mount ISO images read-only
+      mount:
+        path: "{{ astra_at_local_repo_dir }}/{{ item.path }}"
+        src: "{{ astra_at_local_iso_path }}/{{ item.src }}"
+        fstype: iso9660
+        opts: ro,noauto
+        state: mounted
+      loop:
+        -  { src: '{% if ansible_facts.distribution_version == "1.7_x86-64" %}{{ astra_at_local_iso_main_17 }}{% elif ansible_facts.distribution_version == "1.6" %}{{ astra_at_local_iso_main_16 }}{% else %}{{ astra_at_local_iso_main_15 }}{% endif %}', path: '{{ astra_at_local_repo_dir_iso1 }}' }
+        -  { src: '{% if ansible_facts.distribution_version == "1.7_x86-64" %}{{ astra_at_local_iso_update_17 }}{% elif ansible_facts.distribution_version == "1.6" %}{{ astra_at_local_iso_update_16 }}{% else %}{{ astra_at_local_iso_update_15 }}{% endif %}', path: '{{ astra_at_local_repo_dir_iso2 }}' }
+    
+    - name: astra_at_local | Synchronize file from ISO images to repositories
+      synchronize:
+        src: "{{ astra_at_local_repo_dir }}/{{ item.src }}/"
+        dest: "{{ astra_at_local_repo_dir }}/{{ item.dest }}"
+        recursive: yes
+      delegate_to: "{{ inventory_hostname }}"
+      loop:
+        -  { src: '{{ astra_at_local_repo_dir_iso1 }}', dest: '{{ astra_at_local_repo_dir_main }}' }
+        -  { src: '{{ astra_at_local_repo_dir_iso2 }}', dest: '{{ astra_at_local_repo_dir_update }}' }
+
+    - name: astra_at_local | Unmount ISO images
+      mount:
+        path: "{{ astra_at_local_repo_dir }}/{{ item }}"
+        state: absent
+      loop:
+        -  "{{ astra_at_local_repo_dir_iso1 }}"
+        -  "{{ astra_at_local_repo_dir_iso2 }}"
+    
+    - name: astra_at_local | Setting repositories in sources.list
+      template:
+        src: "{{ astra_at_local_templates_path }}/sources.list.j2"
+        dest: /etc/apt/sources.list
+        owner: root
+        group: root
+        mode: '0644'
+  when: astra_at_local_repo_create
+
+#########################################
+# Section Update Grub
+- block:
+    - name: astra_at_local | Configure file grub
+      lineinfile:
+        path: /etc/default/grub
+        regexp: "{{ item.src }}"
+        line: "{{ item.dest }}"
+      loop:
+        - { src: '^GRUB_TIMEOUT=.*', dest: 'GRUB_TIMEOUT={{ astra_at_local_grub_timeout }}' }
+        - { src: '^GRUB_DISABLE_RECOVERY=.*', dest: 'GRUB_DISABLE_RECOVERY="true"' }
+      register: astra_at_local_grub_config
+    
+    - block:
+        - name: astra_at_local | Create hash password for grub
+          expect:
+            command: /bin/bash -c "grub-mkpasswd-pbkdf2"
+            responses:
+              (.*)Введите пароль(.*): "{{ astra_at_local_grub_password }}"
+              (.*)Повторно введите пароль(.*): "{{ astra_at_local_grub_password }}"
+          register: astra_at_local_grub_password_hash
+        
+        - name: astra_at_local | Setting password for grub
+          template:
+            src: "{{ astra_at_local_templates_path }}/07_password.j2"
+            dest: /etc/grub.d/07_password
+            owner: root
+            group: root
+            mode: '0755'
+          register: astra_at_local_grub_password_add
+      when: ansible_facts.distribution_version != "1.5"
+    
+    - name: astra_at_local | Update grub
+      shell: update-grub
+      when: astra_at_local_grub_config.changed or astra_at_local_grub_password_add.changed
+  when: astra_at_local_grub_edit
+
+#########################################
+# Section Update OS
+- block:
+    - name: astra_at_local | Upgrade Astra OS via dist-upgrade
+      apt:
+        upgrade: dist
+        update_cache: yes
+        autoremove: yes
+      when: astra_at_local_os_update_tool == "dist_upgrade"
+    
+    - block:
+        - name: astra_at_local | Install package astra-update
+          apt:
+            name: astra-update
+            update_cache: yes
+        
+        - name: astra_at_local | Upgrade Astra OS via astra-update
+          shell: /bin/bash -c "sudo astra-update -A -r"
+      when: astra_at_local_os_update_tool == "astra_update"
+  when: astra_at_local_os_update
+##########################################
+
+- name: astra_at_local | Configuration of a memory cleaning policy
+  replace:
+    path: "{{ item.path }}"
+    regexp: "{{ item.src }}"
+    replace: "{{ item.dest }}"
+  loop:
+    - { path: '/etc/fstab', src: 'errors=remount-ro[\t ]', dest: 'errors=remount-ro,secdelrnd={{ astra_at_local_fstab_secdelrnd }} ' }
+    - { path: '/etc/fstab', src: 'defaults[\t ]', dest: 'defaults,secdelrnd={{ astra_at_local_fstab_secdelrnd }} ' }
+    - { path: '/etc/parsec/swap_wiper.conf', src: '^ENABLED=.*', dest: 'ENABLED=Y' }
+
+- name: astra_at_local | Setting up the program Afick
+  template:
+    src: "{{ astra_at_local_templates_path }}/afick.conf.j2"
+    dest: /etc/afick.conf
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: astra_at_local | Setting a record for CD-disk under mandate level
+  lineinfile:
+    path: /usr/sbin/pdp-init-fs
+    regexp: '^/usr/sbin/pdpl-file\s+"0:0:0:ehole"\s+/dev/sr*'
+    line: /usr/sbin/pdpl-file "0:0:0:ehole"      /dev/sr*
+    insertafter: '^fi'
+
+- name: astra_at_local | Turning off service
+  service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop:
+    - avahi-daemon
+    - bluetooth
+    - lwresd
+    - nscd
+    - nslcd
+    - rpcbind
+    - wicd
+    - winbind
+  ignore_errors: yes
+
+- name: astra_at_local | Setup Local mandate level
+  template:
+    src: "{{ astra_at_local_templates_path }}/mac_levels.j2"
+    dest: /etc/parsec/mac_levels
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: astra_at_local | Setting file common-auth, common-account, common-password
+  lineinfile:
+    path: "{{ item.path }}"
+    regexp: "{{ item.reg }}"
+    line: "{{ item.line }}"
+  loop:
+    - { path: '/etc/pam.d/common-auth', reg: '^auth\s+\[success=ignore default=die\]\s+pam_tally.so.*', line: 'auth    [success=ignore default=die]    pam_tally.so per_user deny={{ astra_at_local_users_passdeny }} lock_time={{ astra_at_local_users_passlocktime }} unlock_time={{ astra_at_local_users_passunlocktime }}' }
+    - { path: '/etc/pam.d/common-account', reg: '^account\srequired\s+pam_tally.so', line: 'account required        pam_tally.so deny={{ astra_at_local_users_passdeny }} lock_time={{ astra_at_local_users_passlocktime }} unlock_time={{ astra_at_local_users_passunlocktime }}' }
+    - { path: '/etc/pam.d/common-password', reg: '^password\s+requisite\s+pam_cracklib.so.*', line: 'password        requisite                       pam_cracklib.so retry=3 difok=3 minlen={{ astra_at_local_users_passlength }} lcredit=-1 ucredit=-1 dcredit=-1 ocredit=-1' }
+
+- name: astra_at_local | Setting file login.defs
+  lineinfile:
+    path: /etc/login.defs
+    regexp: "{{ item.reg }}"
+    line: "{{ item.line }}"
+  loop:
+    - { reg: '^PASS_MAX_DAYS.*', line: 'PASS_MAX_DAYS {{ astra_at_local_users_passmaxdays }}' }
+    - { reg: '^PASS_MIN_DAYS.*', line: 'PASS_MIN_DAYS {{ astra_at_local_users_passmindays }}' }
+    - { reg: '^PASS_WARN_AGE.*', line: 'PASS_WARN_AGE {{ astra_at_local_users_passwarnage }}' }
+
+- name: astra_at_local | Settings Audit policy 
+  shell: useraud -o -- ocxudntligarmphew:ocxudntligarmphew
+
+- name: astra_at_local | Add the Local Users
+  user:
+    name: "{{ item }}"
+    shell: /bin/bash
+    groups: "{{ astra_at_local_users_groups }}"
+    append: yes
+    password: "{{ astra_at_local_users_password  | password_hash('sha512') }}"
+    update_password: on_create
+  register: astra_at_local_users_create
+  with_items: "{{ astra_at_local_users }}"
+
+- name: astra_at_local | Edit mandate level Users
+  shell: pdpl-user -l 0:3 "{{ item }}"
+  with_items: "{{ astra_at_local_users }}"
+  when: astra_at_local_users_create.changed
+
+- block:
+    - name: astra_at_local | Create a common resource for confedential documents
+      file:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ item }}"
+        state: directory
+        mode: '0750'
+        owner: "{{ astra_at_local_owner_conf_dir }}"
+        group: "{{ astra_at_local_group_conf_dir }}"
+      register: astra_at_local_create_conf_dir
+      loop:
+        - "{{ astra_at_local_namedir_ns }}"
+        - "{{ astra_at_local_namedir_dsp }}"
+        - "{{ astra_at_local_namedir_s }}"
+        - "{{ astra_at_local_namedir_ss }}"
+    
+    - name: astra_at_local | Edit mandate level confedential directory
+      shell: |
+        pdpl-file 3:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"
+        pdpl-file 1:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_dsp }}"
+        pdpl-file 2:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_s }}"
+        pdpl-file 3:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_ss }}"
+      when: astra_at_local_create_conf_dir.changed
+    
+    - name: astra_at_local | Create a confedential directory Share
+      file:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ item }}/общая"
+        state: directory
+        mode: '2770'
+        owner: "{{ astra_at_local_owner_conf_dir }}"
+        group: "{{ astra_at_local_group_conf_dir }}"
+      loop:
+        - "{{ astra_at_local_namedir_ns }}"
+        - "{{ astra_at_local_namedir_dsp }}"
+        - "{{ astra_at_local_namedir_s }}"
+        - "{{ astra_at_local_namedir_ss }}"
+    
+    - name: astra_at_local | Sets default ACL for confedential directory Share
+      acl:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ item }}/общая"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      register: astra_at_local_create_conf_dir_share
+      loop:
+        - "{{ astra_at_local_namedir_ns }}"
+        - "{{ astra_at_local_namedir_dsp }}"
+        - "{{ astra_at_local_namedir_s }}"
+        - "{{ astra_at_local_namedir_ss }}"
+      
+    - name: astra_at_local | Edit mandate level confedential directory Share
+      shell: |
+        pdpl-file 1:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_dsp }}"/общая
+        pdpl-file 2:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_s }}"/общая
+        pdpl-file 3:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_ss }}"/общая
+      when: astra_at_local_create_conf_dir_share.changed
+    
+    - name: astra_at_local | Create directory Users {{ astra_at_local_namedir_ns }}
+      file:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_ns }}/{{ item }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item }}"
+        group: "{{ item }}"
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Sets default ACL for directory Users {{ astra_at_local_namedir_ns }}
+      acl:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_ns }}/{{ item }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Create directory Users {{ astra_at_local_namedir_dsp }}
+      file:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_dsp }}/{{ item }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item }}"
+        group: "{{ item }}"
+      register: astra_at_local_create_conf_dir_dsp_users
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Sets default ACL for directory Users {{ astra_at_local_namedir_dsp }}
+      acl:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_dsp }}/{{ item }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Edit mandate level confedential directory Users {{ astra_at_local_namedir_dsp }}
+      shell: pdpl-file 1:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_dsp }}"/"{{ item }}"
+      with_items: "{{ astra_at_local_users }}"
+      when: astra_at_local_create_conf_dir_dsp_users.changed
+    
+    - name: astra_at_local | Create directory Users {{ astra_at_local_namedir_s }}
+      file:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_s }}/{{ item }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item }}"
+        group: "{{ item }}"
+      register: astra_at_local_create_conf_dir_s_users
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Sets default ACL for directory Users {{ astra_at_local_namedir_s }}
+      acl:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_s }}/{{ item }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Edit mandate level confedential directory Users {{ astra_at_local_namedir_s }}
+      shell: pdpl-file 2:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_s }}"/"{{ item }}"
+      with_items: "{{ astra_at_local_users }}"
+      when: astra_at_local_create_conf_dir_s_users.changed
+    
+    - name: astra_at_local | Create directory Users {{ astra_at_local_namedir_ss }}
+      file:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_ss }}/{{ item }}"
+        state: directory
+        mode: '0770'
+        owner: "{{ item }}"
+        group: "{{ item }}"
+      register: astra_at_local_create_conf_dir_ss_users
+      with_items: "{{ astra_at_local_users }}"
+    
+    - name: astra_at_local | Sets default ACL for directory Users {{ astra_at_local_namedir_ss }}
+      acl:
+        path: "/{{ astra_at_local_namedir_docs }}/{{ astra_at_local_namedir_ss }}/{{ item }}"
+        etype: group
+        permissions: rwx
+        default: yes
+        state: present
+      with_items: "{{ astra_at_local_users }}"
+
+    - name: astra_at_local | Edit mandate level confedential directory Users {{ astra_at_local_namedir_ss }}
+      shell: pdpl-file 3:0:0:ccnr /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_ss }}"/"{{ item }}"
+      with_items: "{{ astra_at_local_users }}"
+      when: astra_at_local_create_conf_dir_ss_users.changed
+
+    - name: astra_at_local | Remove bit CCNR mandate level confedential directory
+      shell: |
+        pdpl-file -R 1:0:0 /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_dsp }}"
+        pdpl-file -R 2:0:0 /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_s }}"
+        pdpl-file -R 3:0:0 /"{{ astra_at_local_namedir_docs }}"/"{{ astra_at_local_namedir_ss }}"
+      when: astra_at_local_create_conf_dir.changed
+  when: astra_at_local_namedir_docs_create
