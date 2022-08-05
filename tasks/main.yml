@@ -1,51 +1,88 @@
 ---
 # tasks file for astra_at_local
+
+- name: astra_at_local | Creation of directory for repositories
+  file:
+    path: "{{ astra_at_local_repo_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  when: astra_at_local_repo_main_create or astra_at_local_repo_update_create
+
 - block:
-    - name: astra_at_local | Creation of directory for repositories
-      file:
-        path: "{{ astra_at_local_repo_dir }}"
-        state: directory
-        mode: '0755'
-        owner: root
-        group: root
-    
-    - name: astra_at_local | Mount ISO images read-only
+    - name: astra_at_local | Mount ISO images "{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_local_iso_main_17 }}{% elif ansible_facts.distribution_version == '1.6' %}{{ astra_at_local_iso_main_16 }}{% else %}{{ astra_at_local_iso_main_15 }}{% endif %}" read-only
       mount:
-        path: "{{ astra_at_local_repo_dir }}/{{ item.path }}"
-        src: "{{ astra_at_local_iso_path }}/{{ item.src }}"
+        path: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso1 }}"
+        src: "{{ astra_at_local_iso_path }}/{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_local_iso_main_17 }}{% elif ansible_facts.distribution_version == '1.6' %}{{ astra_at_local_iso_main_16 }}{% else %}{{ astra_at_local_iso_main_15 }}{% endif %}"
         fstype: iso9660
         opts: ro,noauto
         state: mounted
-      loop:
-        -  { src: '{% if ansible_facts.distribution_version == "1.7_x86-64" %}{{ astra_at_local_iso_main_17 }}{% elif ansible_facts.distribution_version == "1.6" %}{{ astra_at_local_iso_main_16 }}{% else %}{{ astra_at_local_iso_main_15 }}{% endif %}', path: '{{ astra_at_local_repo_dir_iso1 }}' }
-        -  { src: '{% if ansible_facts.distribution_version == "1.7_x86-64" %}{{ astra_at_local_iso_update_17 }}{% elif ansible_facts.distribution_version == "1.6" %}{{ astra_at_local_iso_update_16 }}{% else %}{{ astra_at_local_iso_update_15 }}{% endif %}', path: '{{ astra_at_local_repo_dir_iso2 }}' }
     
-    - name: astra_at_local | Synchronize file from ISO images to repositories
+    - name: astra_at_local | Synchronize file from ISO images to repositories Main
       synchronize:
-        src: "{{ astra_at_local_repo_dir }}/{{ item.src }}/"
-        dest: "{{ astra_at_local_repo_dir }}/{{ item.dest }}"
+        src: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso1 }}/"
+        dest: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_main }}"
         recursive: yes
       delegate_to: "{{ inventory_hostname }}"
-      loop:
-        -  { src: '{{ astra_at_local_repo_dir_iso1 }}', dest: '{{ astra_at_local_repo_dir_main }}' }
-        -  { src: '{{ astra_at_local_repo_dir_iso2 }}', dest: '{{ astra_at_local_repo_dir_update }}' }
 
-    - name: astra_at_local | Unmount ISO images
-      mount:
-        path: "{{ astra_at_local_repo_dir }}/{{ item }}"
-        state: absent
-      loop:
-        -  "{{ astra_at_local_repo_dir_iso1 }}"
-        -  "{{ astra_at_local_repo_dir_iso2 }}"
+    # Не поддерживает рекурсивное копирование в версии 2.7
+    # - name: astra_at_local | Copy file from ISO images to repositories Main
+    #   copy:
+    #     src: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso1 }}/"
+    #     dest: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_main }}"
+    #     remote_src: yes
+    #     follow: yes
+    #     mode: '0755'
+    #     owner: root
+    #     group: root
     
-    - name: astra_at_local | Setting repositories in sources.list
-      template:
-        src: "{{ astra_at_local_templates_path }}/sources.list.j2"
-        dest: /etc/apt/sources.list
-        owner: root
-        group: root
-        mode: '0644'
-  when: astra_at_local_repo_create
+    - name: astra_at_local | Unmount ISO images Main
+      mount:
+        path: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso1 }}"
+        state: absent
+  when: astra_at_local_repo_main_create
+
+- block:
+    - name: astra_at_local | Mount ISO images "{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_local_iso_update_17 }}{% elif ansible_facts.distribution_version == '1.6' %}{{ astra_at_local_iso_update_16 }}{% else %}{{ astra_at_local_iso_update_15 }}{% endif %}" read-only
+      mount:
+        path: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso2 }}"
+        src: "{{ astra_at_local_iso_path }}/{% if ansible_facts.distribution_version == '1.7_x86-64' %}{{ astra_at_local_iso_update_17 }}{% elif ansible_facts.distribution_version == '1.6' %}{{ astra_at_local_iso_update_16 }}{% else %}{{ astra_at_local_iso_update_15 }}{% endif %}"
+        fstype: iso9660
+        opts: ro,noauto
+        state: mounted
+    
+    - name: astra_at_local | Synchronize file from ISO images to repositories Update
+      synchronize:
+        src: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso2 }}/"
+        dest: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_update }}"
+        recursive: yes
+      delegate_to: "{{ inventory_hostname }}"
+
+    # Не поддерживает рекурсивное копирование в версии 2.7
+    # - name: astra_at_local | Copy file from ISO images to repositories Update
+    #   copy:
+    #     src: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso2 }}/"
+    #     dest: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_update }}"
+    #     remote_src: yes
+    #     follow: yes
+    #     mode: '0755'
+    #     owner: root
+    #     group: root
+    
+    - name: astra_at_local | Unmount ISO images Update
+      mount:
+        path: "{{ astra_at_local_repo_dir }}/{{ astra_at_local_repo_dir_iso2 }}"
+        state: absent
+  when: astra_at_local_repo_update_create
+
+- name: astra_at_local | Setting repositories in sources.list
+  template:
+    src: "{{ astra_at_local_templates_path }}/sources.list.j2"
+    dest: /etc/apt/sources.list
+    owner: root
+    group: root
+    mode: '0644'
 
 #########################################
 # Section Update Grub

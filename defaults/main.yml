@@ -3,11 +3,14 @@
 astra_at_local_files_path: "{{ role_path }}/files"
 astra_at_local_templates_path: "{{ role_path }}/templates"
 
-# Создание локального репозитория (true-создается, false-не создается):
-astra_at_local_repo_create: false
+# Создать репозиторий базового диска (true-создавать, false-несоздавать):
+astra_at_local_repo_main_create: false
+# Создать репозиторий диска с обновлениями (true-создавать, false-несоздавать):
+astra_at_local_repo_update_create: false
+
 # Путь до директории где находятся ISO образы основного диска и диска с обновлениями:
 astra_at_local_iso_path: /home/user/astra
-# Названия ISO образов:
+# Названия ISO образов (базового и если нужно то образа с обновлениями):
 astra_at_local_iso_main_15: smolensk-1.5.iso
 astra_at_local_iso_update_15: astra-update20201201SE15.iso
 astra_at_local_iso_main_16: smolensk-1.6.iso
@@ -40,7 +43,7 @@ astra_at_local_namelevel3: Совершенно_секретно
 # Задаем политику паролей для пользователей:
 astra_at_local_users_passdeny: 5
 astra_at_local_users_passlocktime: 10
-astra_at_local_users_passunlocktime: 900
+astra_at_local_users_passunlocktime: 600
 astra_at_local_users_passlength: 8
 astra_at_local_users_passmaxdays: 30
 astra_at_local_users_passmindays: 0
