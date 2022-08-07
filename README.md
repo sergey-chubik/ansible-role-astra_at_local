@@ -17,9 +17,10 @@ Role Variables
 --------------
 
 Доступные переменные перечислены вместе со значениями по умолчанию в файле **defaults/main.yml**.
-Переменные отвечающие за создание локального репозитория, установку оперативных обновлений и обновление загрузчика grub (по умолчанию `false`):
+Переменные отвечающие за создание локального репозитория, репозиторий диска с обновлениями, установку оперативных обновлений и обновление загрузчика grub (по умолчанию `false`):
 ```
-astra_at_local_repo_create: false
+astra_at_local_repo_main_create: false
+astra_at_local_repo_update_create: false
 astra_at_local_os_update: false
 astra_at_local_grub_edit: false
 ```
