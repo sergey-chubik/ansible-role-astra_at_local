@@ -40,6 +40,8 @@ astra_at_local_namelevel0: Несекретно
 astra_at_local_namelevel1: ДСП
 astra_at_local_namelevel2: Секретно
 astra_at_local_namelevel3: Совершенно_секретно
+# Задаем настройки аудита по умолчанию для всех пользователей (шестнацетиричное значение):
+astra_at_local_audit_level: 1ffff
 # Задаем политику паролей для пользователей:
 astra_at_local_users_passdeny: 5
 astra_at_local_users_passlocktime: 10

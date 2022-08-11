@@ -192,15 +192,27 @@
     group: root
     mode: '0644'
 
-- name: astra_at_local | Setting file common-auth, common-account, common-password
-  lineinfile:
+- name: astra_at_local | Settings Audit policy 
+  template:
+    src: "{{ astra_at_local_templates_path }}/other:0.j2"
+    dest: /etc/parsec/auddb/other:0
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: astra_at_local | Setting files /usr/share/pam-configs/*
+  replace:
     path: "{{ item.path }}"
     regexp: "{{ item.reg }}"
-    line: "{{ item.line }}"
+    replace: "{{ item.rep }}"
+  register: astra_at_local_pam_config
   loop:
-    - { path: '/etc/pam.d/common-auth', reg: '^auth\s+\[success=ignore default=die\]\s+pam_tally.so.*', line: 'auth    [success=ignore default=die]    pam_tally.so per_user deny={{ astra_at_local_users_passdeny }} lock_time={{ astra_at_local_users_passlocktime }} unlock_time={{ astra_at_local_users_passunlocktime }}' }
-    - { path: '/etc/pam.d/common-account', reg: '^account\srequired\s+pam_tally.so', line: 'account required        pam_tally.so deny={{ astra_at_local_users_passdeny }} lock_time={{ astra_at_local_users_passlocktime }} unlock_time={{ astra_at_local_users_passunlocktime }}' }
-    - { path: '/etc/pam.d/common-password', reg: '^password\s+requisite\s+pam_cracklib.so.*', line: 'password        requisite                       pam_cracklib.so retry=3 difok=3 minlen={{ astra_at_local_users_passlength }} lcredit=-1 ucredit=-1 dcredit=-1 ocredit=-1' }
+    - { path: '/usr/share/pam-configs/tally', reg: 'pam_tally.so.*', rep: 'pam_tally.so per_user deny={{ astra_at_local_users_passdeny }} lock_time={{ astra_at_local_users_passlocktime }} unlock_time={{ astra_at_local_users_passunlocktime }}' }
+    - { path: '/usr/share/pam-configs/cracklib', reg: '^requisite\s+pam_cracklib.so.*', rep: 'requisite                       pam_cracklib.so retry=3 difok=3 minlen={{ astra_at_local_users_passlength }} lcredit=-1 ucredit=-1 dcredit=-1 ocredit=-1' }
+
+- name: astra_at_local | Update PAM configuration profiles
+  shell: DEBIAN_FRONTEND=noninteractive pam-auth-update --package
+  when: astra_at_local_pam_config.changed
 
 - name: astra_at_local | Setting file login.defs
   lineinfile:
@@ -211,9 +223,6 @@
     - { reg: '^PASS_MAX_DAYS.*', line: 'PASS_MAX_DAYS {{ astra_at_local_users_passmaxdays }}' }
     - { reg: '^PASS_MIN_DAYS.*', line: 'PASS_MIN_DAYS {{ astra_at_local_users_passmindays }}' }
     - { reg: '^PASS_WARN_AGE.*', line: 'PASS_WARN_AGE {{ astra_at_local_users_passwarnage }}' }
-
-- name: astra_at_local | Settings Audit policy 
-  shell: useraud -o -- ocxudntligarmphew:ocxudntligarmphew
 
 - name: astra_at_local | Add the Local Users
   user:
